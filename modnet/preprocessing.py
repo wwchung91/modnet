@@ -1,19 +1,73 @@
-from pymatgen import Structure
-from sklearn.feature_selection import mutual_info_regression
-import pandas as pd
-import numpy as np
-from matminer.utils.conversions import composition_to_oxidcomposition
-from matminer.featurizers.composition import *
-from matminer.featurizers.base import *
-from matminer.featurizers.conversions import *
-from pymatgen.core.periodic_table import *
-from matminer.featurizers.structure import *
-from matminer.featurizers.site import *
-from pymatgen.analysis.local_env import VoronoiNN
-from typing import Dict, List, Union
+# coding: utf-8
+# Distributed under the terms of the MIT License.
+
+""" This module defines the :class:`MODData` class, featurizer functions
+and functions to compute normalized mutual information (NMI) and relevance redundancy
+(RR) between descriptors.
+
+"""
+
 import pickle
 import os
 import logging
+
+from pymatgen import Structure
+from pymatgen.core.periodic_table import Element
+from sklearn.feature_selection import mutual_info_regression
+import pandas as pd
+import numpy as np
+
+from matminer.featurizers.base import MultipleFeaturizer
+from matminer.featurizers.composition import (
+    AtomicOrbitals,
+    AtomicPackingEfficiency,
+    BandCenter,
+    CohesiveEnergy,
+    ElectronAffinity,
+    ElementFraction,
+    ElementProperty,
+    IonProperty,
+    Miedema,
+    Stoichiometry,
+    TMetalFraction,
+    ValenceOrbital,
+    YangSolidSolution,
+)
+
+from matminer.featurizers.conversions import CompositionToOxidComposition
+from matminer.featurizers.structure import (
+    BagofBonds,
+    BondFractions,
+    ChemicalOrdering,
+    CoulombMatrix,
+    DensityFeatures,
+    EwaldEnergy,
+    GlobalSymmetryFeatures,
+    MaximumPackingEfficiency,
+    PartialRadialDistributionFunction,
+    RadialDistributionFunction,
+    SineCoulombMatrix,
+    SiteStatsFingerprint,
+    StructuralHeterogeneity,
+    XRDPowderPattern,
+)
+from matminer.featurizers.site import (
+    AGNIFingerprints,
+    AverageBondAngle,
+    AverageBondLength,
+    BondOrientationalParameter,
+    ChemEnvSiteFingerprint,
+    CoordinationNumber,
+    CrystalNNFingerprint,
+    GaussianSymmFunc,
+    GeneralizedRadialDistributionFunction,
+    LocalPropertyDifference,
+    OPSiteFingerprint,
+    VoronoiFingerprint,
+)
+from pymatgen.analysis.local_env import VoronoiNN
+from typing import Dict, List, Union
+
 database = pd.DataFrame([])
 
 
