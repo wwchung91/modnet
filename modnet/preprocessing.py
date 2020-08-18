@@ -68,7 +68,7 @@ from matminer.featurizers.site import (
 from pymatgen.analysis.local_env import VoronoiNN
 from typing import Dict, List, Union
 
-database = pd.DataFrame([])
+DATABASE = pd.DataFrame([])
 
 
 def nmi_target(df_feat: pd.DataFrame, df_target: pd.DataFrame,
@@ -504,12 +504,12 @@ class MODData():
         if fast and len(self.mpids)>0:
             print('Fast featurization on, retrieving from database...')
             this_dir, this_filename = os.path.split(__file__)
-            global database
-            if len(database) == 0:
-                database = pd.read_pickle(db_file)
-            mpids_done = [x for x in self.mpids if x in database.index]
+            global DATABASE
+            if len(DATABASE) == 0:
+                DATABASE = pd.read_pickle(db_file)
+            mpids_done = [x for x in self.mpids if x in DATABASE.index]
             print('Retrieved features for {} out of {} materials'.format(len(mpids_done),len(self.mpids)))
-            df_done = database.loc[mpids_done]
+            df_done = DATABASE.loc[mpids_done]
             df_todo = self.df_structure.drop(mpids_done,axis=0)
 
             if len(df_todo) > 0 and len(df_done) > 0:
