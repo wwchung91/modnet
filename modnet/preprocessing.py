@@ -74,29 +74,37 @@ DATABASE = pd.DataFrame([])
 
 
 def nmi_target(df_feat: pd.DataFrame, df_target: pd.DataFrame,
-               drop_constant_features: bool=True, **kwargs) -> pd.DataFrame:
+               drop_constant_features: bool = True, **kwargs) -> pd.DataFrame:
     """
-    Computes the Normalized Mutual Information (NMI) between a list of input features and a target variable.
+    Computes the Normalized Mutual Information (NMI) between a list of
+    input features and a target variable.
 
     Args:
-        df_feat: panda's DataFrame containing the input features for which the NMI with the target variable is to be
-            computed.
-        df_target: panda's DataFrame containing the target variable. This DataFrame should contain only one column and
-            have the same size as df_feat.
-        drop_constant_features: If True, the features that are constant across the entire data set will be dropped.
-        **kwargs: Keyword arguments to be passed down to the mutual_info_regression function from scikit-learn. This
+        df_feat (pandas.DataFrame): Dataframe containing the input features for
+            which the NMI with the target variable is to be computed.
+        df_target (pandas.DataFrame): Dataframe containing the target variable.
+            This DataFrame should contain only one column and have the same
+            size as `df_feat`.
+        drop_constant_features (bool): If True, the features that are constant
+            across the entire data set will be dropped.
+        **kwargs: Keyword arguments to be passed down to the
+            :py:func:`mutual_info_regression` function from scikit-learn. This
             can be useful e.g. for testing purposes.
 
     Returns:
-        panda's DataFrame: panda's DataFrame containing the NMI between each of the input features and the target
-            variable.
+        pandas.DataFrame: Dataframe containing the NMI between each of
+            the input features and the target variable.
+
     """
     # Initial checks
     if df_target.shape[1] != 1:
         raise ValueError('The target DataFrame should have exactly one column.')
+
     if len(df_feat) != len(df_target):
-        raise ValueError('The input features DataFrame and the target variable DataFrame should contain the same '
-                         'number of data points.')
+        raise ValueError(
+            'The input features DataFrame and the target variable DataFrame '
+            'should contain the same number of data points.'
+        )
 
     # Drop features which have the same value for the entire data set
     if drop_constant_features:
@@ -124,16 +132,18 @@ def nmi_target(df_feat: pd.DataFrame, df_target: pd.DataFrame,
 
 
 def get_cross_nmi(df_feat: pd.DataFrame, **kwargs) -> pd.DataFrame:
-    """Computes the Normalized Mutual Information (NMI) between input features.
+    """
+    Computes the Normalized Mutual Information (NMI) between input features.
 
     Args:
-        df_feat: panda's DataFrame containing the input features for which the NMI with the target variable is to be
-            computed.
-        **kwargs: Keyword arguments to be passed down to the mutual_info_regression function from scikit-learn. This
+        df_feat (pandas.DataFrame): Dataframe containing the input features for
+            which the NMI with the target variable is to be computed.
+        **kwargs: Keyword arguments to be passed down to the
+            :py:func:`mutual_info_regression` function from scikit-learn. This
             can be useful e.g. for testing purposes.
 
     Returns:
-        pd.DataFrame: panda's DataFrame containing the Normalized Mutual Information between features.
+        pd.DataFrame: pandas.DataFrame containing the Normalized Mutual Information between features.
     """
     # Prepare the output DataFrame and compute the mutual information
     out_df = pd.DataFrame([], columns=df_feat.columns, index=df_feat.columns)
@@ -330,27 +340,32 @@ def featurize_composition(df):
                                      AtomicPackingEfficiency(),
                                      ])
 
-
-    df = featurizer.featurize_dataframe(df,"composition",multiindex=True,ignore_errors=True)
+    df = featurizer.featurize_dataframe(df, "composition", multiindex=True, ignore_errors=True)
     df.columns = df.columns.map('|'.join).str.strip('|')
-
 
     ox_featurizer = MultipleFeaturizer([OxidationStates(),
                                         ElectronegativityDiff()
                                         ])
 
-    df = CompositionToOxidComposition().featurize_dataframe(df,"Input Data|composition")
+    df = CompositionToOxidComposition().featurize_dataframe(df, "Input Data|composition")
 
-    df = ox_featurizer.featurize_dataframe(df,"composition_oxid",multiindex=True,ignore_errors=True)
-    df=df.rename(columns = {'Input Data':''})
+    df = ox_featurizer.featurize_dataframe(df, "composition_oxid", multiindex=True, ignore_errors=True)
+    df = df.rename(columns={'Input Data': ''})
     df.columns = df.columns.map('|'.join).str.strip('|')
 
-    df['AtomicOrbitals|HOMO_character'] = df['AtomicOrbitals|HOMO_character'].map({'s':1,'p':2,'d':3,'f':4})
-    df['AtomicOrbitals|LUMO_character'] = df['AtomicOrbitals|LUMO_character'].map({'s':1,'p':2,'d':3,'f':4})
-    df['AtomicOrbitals|HOMO_element'] = df['AtomicOrbitals|HOMO_element'].apply(lambda x: -1 if not isinstance(x, str) else Element(x).Z)
-    df['AtomicOrbitals|LUMO_element'] = df['AtomicOrbitals|LUMO_element'].apply(lambda x: -1 if not isinstance(x, str) else Element(x).Z)
+    _orbitals = {"s": 1, "p": 2, "d": 3, "f": 4}
 
-    df = df.dropna(axis=1,how='all')
+    df['AtomicOrbitals|HOMO_character'] = df['AtomicOrbitals|HOMO_character'].map(_orbitals)
+    df['AtomicOrbitals|LUMO_character'] = df['AtomicOrbitals|LUMO_character'].map(_orbitals)
+
+    df['AtomicOrbitals|HOMO_element'] = df['AtomicOrbitals|HOMO_element'].apply(
+        lambda x: -1 if not isinstance(x, str) else Element(x).Z
+    )
+    df['AtomicOrbitals|LUMO_element'] = df['AtomicOrbitals|LUMO_element'].apply(
+        lambda x: -1 if not isinstance(x, str) else Element(x).Z
+    )
+
+    df = df.dropna(axis=1, how='all')
     df = df.replace([np.inf, -np.inf, np.nan], 0)
     df = df.select_dtypes(include='number')
     return df
@@ -367,7 +382,7 @@ def featurize_structure(df):
     scm.fit(df["structure"])
     bf = BondFractions()
     bf.fit(df["structure"])
-    bob =  BagofBonds()
+    bob = BagofBonds()
     bob.fit(df["structure"])
 
     featurizer = MultipleFeaturizer([DensityFeatures(),
@@ -384,22 +399,28 @@ def featurize_structure(df):
                                      bob
                                      ])
 
-
-    df = featurizer.featurize_dataframe(df,"structure",multiindex=True,ignore_errors=True)
+    df = featurizer.featurize_dataframe(df, "structure", multiindex=True, ignore_errors=True)
     df.columns = df.columns.map('|'.join).str.strip('|')
 
     dist = df["RadialDistributionFunction|radial distribution function"][1]['distances'][:50]
-    for i,d in enumerate(dist):
-        df["RadialDistributionFunction|radial distribution function|d_{:.2f}".format(d)] = df["RadialDistributionFunction|radial distribution function"].apply(lambda x: x['distribution'][i])
-    df = df.drop("RadialDistributionFunction|radial distribution function",axis=1)
+    for i, d in enumerate(dist):
+        _rdf_key = "RadialDistributionFunction|radial distribution function|d_{:.2f}".format(d)
+        df[_rdf_key] = df["RadialDistributionFunction|radial distribution function"].apply(lambda x: x['distribution'][i])
 
-    df["GlobalSymmetryFeatures|crystal_system"] = df["GlobalSymmetryFeatures|crystal_system"].map({"cubic":1, "tetragonal":2, "orthorombic":3, "hexagonal":4, "trigonal":5, "monoclinic":6, "triclinic":7})
-    df["GlobalSymmetryFeatures|is_centrosymmetric"] = df["GlobalSymmetryFeatures|is_centrosymmetric"].map({True:1, False:0})
+    df = df.drop("RadialDistributionFunction|radial distribution function", axis=1)
 
+    _crystal_system = {
+        "cubic": 1, "tetragonal": 2, "orthorombic": 3,
+        "hexagonal": 4, "trigonal": 5, "monoclinic": 6, "triclinic": 7
+    }
 
-    df = df.dropna(axis=1,how='all')
+    df["GlobalSymmetryFeatures|crystal_system"] = df["GlobalSymmetryFeatures|crystal_system"].map(_crystal_system)
+    df["GlobalSymmetryFeatures|is_centrosymmetric"] = df["GlobalSymmetryFeatures|is_centrosymmetric"].map({True: 1, False: 0})
+
+    df = df.dropna(axis=1, how='all')
     df = df.replace([np.inf, -np.inf, np.nan], -1)
     df = df.select_dtypes(include='number')
+
     return df
 
 def featurize_site(df):
@@ -587,8 +608,9 @@ class MODData():
 
     def shuffle(self):
         # caution, not fully implemented
+        raise NotImplementedError("shuffle function not yet finished.")
         self.df_featurized =self.df_featurized.sample(frac=1)
-        self.df_targets = self.df_targets.loc[data.df_featurized.index]
+        self.df_targets = self.df_targets.loc[self.df_featurized.index]
 
     def save(self, filename):
         """ Pickle the contents of the `MODData` object
