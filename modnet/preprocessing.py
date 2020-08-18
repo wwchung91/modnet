@@ -203,7 +203,7 @@ def get_features_relevance_redundancy(
     target_nmi: pd.DataFrame,
     cross_nmi: pd.DataFrame,
     n_feat: Optional[int] = None,
-    rr_parameters: Optional[Dict[str, Union[float, Callable[int]]]] = None,
+    rr_parameters: Optional[Dict[str, Union[float, Callable[[int], float]]]] = None,
     return_pc: bool = False
 ) -> List:
     """
