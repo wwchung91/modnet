@@ -68,7 +68,7 @@ from matminer.featurizers.site import (
     VoronoiFingerprint,
 )
 from pymatgen.analysis.local_env import VoronoiNN
-from typing import Dict, List, Union
+from typing import Dict, List, Union, Optional, Callable
 
 DATABASE = pd.DataFrame([])
 
@@ -171,21 +171,71 @@ def get_cross_nmi(df_feat: pd.DataFrame, **kwargs) -> pd.DataFrame:
     return out_df
 
 
-def get_features_relevance_redundancy(target_nmi: pd.DataFrame, cross_nmi: pd.DataFrame,
-                                      n_feat: Union[None, int]=None, rr_parameters: Union[None, Dict]=None,
-                                      return_pc: bool=False) -> List:
+def get_rr_p_parameter_default(nn: int) -> float:
     """
-    Select features from the Relevance Redundancy (RR) score between the input features and the target output.
+    Returns p for the default expression outlined in arXiv:2004:14766.
 
     Args:
-        target_nmi: panda's DataFrame containing the Normalized Mutual Information (NMI) between a list of input
-            features and a target variable, as computed from :py:func:`nmi_target`.
-        cross_nmi: panda's DataFrame containing the Normalized Mutual Information (NMI) between the input features, as
-            computed from :py:func:`get_cross_nmi`.
-        n_feat: Number of features for which the RR score needs to be computed (default: all features).
-        rr_parameters: Allow to tune p and c parameters. Currently allows to fix p and c to constant values instead
-            of using the dynamical evaluation.
-        return_pc: Whether to return the p and c values in the output dictionaries.
+        nn (int): number of features currently in chosen subset.
+
+    Returns:
+        float: the value for p.
+
+    """
+    return max(0.1, 4.5 - 0.4 * nn ** 0.4)
+
+
+def get_rr_c_parameter_default(nn: int) -> float:
+    """
+    Returns c for the default expression outlined in arXiv:2004:14766.
+
+    Args:
+        nn (int): number of features currently in chosen subset.
+
+    Returns:
+        float: the value for p.
+
+    """
+    return min(1e5, 1e-6 * nn ** 3)
+
+
+def get_features_relevance_redundancy(
+    target_nmi: pd.DataFrame,
+    cross_nmi: pd.DataFrame,
+    n_feat: Optional[int] = None,
+    rr_parameters: Optional[Dict[str, Union[float, Callable[int]]]] = None,
+    return_pc: bool = False
+) -> List:
+    """
+    Select features from the Relevance Redundancy (RR) score between the input
+    features and the target output.
+
+    The RR is defined following Equation 2 of De Breuck et al, arXiv:2004:14766,
+    with default values,
+
+    ..math:: p = \\max{0.1, 4.5 -  n^{0.4}},
+
+    and
+
+    ..math:: c = 10^{-6} n^3,
+
+    where :math:`n` is the number of features in the "chosen" subset for that iteration.
+    These values can be overriden with the `rr_parameters` dictionary argument.
+
+    Args:
+        target_nmi (pandas.DataFrame): dataframe  containing the Normalized
+            Mutual Information (NMI) between a list of input features and a
+            target variable, as computed from :py:func:`nmi_target`.
+        cross_nmi (pandas.DataFrame): dataframe containing the NMI between the
+            input features, as computed from :py:func:`get_cross_nmi`.
+        n_feat (int): Number of features for which the RR score needs to be computed (default: all features).
+        rr_parameters (dict): Allows tuning of p and c parameters. Currently
+            allows fixing of p and c to constant values instead of using the
+            dynamical evaluation. Expects to find keys `"p"` and `"c"`, containing
+            either a callable that takes `n` as an argument and returns the
+            desired `p` or `c`, or another dictionary containing the key `"value"`
+            that stores a constant value of `p` or `c`.
+        return_pc: Whether to returcolumnshe p and c values in the output dictionaries.
 
     Returns:
         list: List of dictionaries containing the results of the relevance-redundancy selection algorithm.
@@ -198,29 +248,32 @@ def get_features_relevance_redundancy(target_nmi: pd.DataFrame, cross_nmi: pd.Da
 
     # Define the functions for the parameters
     if rr_parameters is None:
-        def get_p(nn):
-            p = 4.5 - (nn ** 0.4) * 0.4
-            return 0.1 if p < 0.1 else p
-
-        def get_c(nn):
-            c = 0.000001 * nn ** 3
-            return 100000 if c > 100000 else c
+        get_p = get_rr_p_parameter_default
+        get_c = get_rr_c_parameter_default
     else:
         if 'p' not in rr_parameters or 'c' not in rr_parameters:
             raise ValueError('When tuning p and c with rr_parameters in get_features_relevance_redundancy, '
                              'both parameters should be tuned')
         # Set up p
-        if rr_parameters['p']['function'] == 'constant':
-            def get_p(nn):
+        if callable(rr_parameters["p"]):
+            get_p = rr_parameters["p"]
+        elif rr_parameters['p'].get('function') == 'constant':
+            def get_p(_):
                 return rr_parameters['p']['value']
         else:
-            raise ValueError('Allowed function for p : constant')
+            raise ValueError(
+                'If not passing a callable, "p" dict must contain keys "function" and "value".'
+            )
         # Set up c
-        if rr_parameters['c']['function'] == 'constant':
-            def get_c(nn):
+        if callable(rr_parameters["c"]):
+            get_c = rr_parameters["c"]
+        elif rr_parameters['c'].get('function') == 'constant':
+            def get_c(_):
                 return rr_parameters['c']['value']
         else:
-            raise ValueError('Allowed function for c : constant')
+            raise ValueError(
+                'If not passing a callable, "c" dict must contain keys "function" and "value".'
+            )
 
     # Set up the output list
     out = []
@@ -244,8 +297,8 @@ def get_features_relevance_redundancy(target_nmi: pd.DataFrame, cross_nmi: pd.Da
         logging.debug("In selection of feature {}/{} features...".format(n+1, n_feat))
         if (n+1) % 50 == 0:
             logging.info("Selected {}/{} features...".format(n, n_feat))
-        p = get_p(nn=n)
-        c = get_c(nn=n)
+        p = get_p(n)
+        c = get_c(n)
 
         # Compute the RR score
         score = cross_nmi.copy()
@@ -272,42 +325,44 @@ def get_features_relevance_redundancy(target_nmi: pd.DataFrame, cross_nmi: pd.Da
         if return_pc:
             feat_out['RR_p'] = p
             feat_out['RR_c'] = c
+
         out.append(feat_out)
 
     return out
 
 
-def get_features_dyn(n_feat,cross_mi, target_mi):
+def get_features_dyn(n_feat, cross_mi, target_mi):
 
-    first_feature =target_mi.nlargest(1).index[0]
+    first_feature = target_mi.nlargest(1).index[0]
     feature_set = [first_feature]
+
+    get_p = get_rr_p_parameter_default
+    get_c = get_rr_c_parameter_default
 
     if n_feat == -1:
         n_feat = len(cross_mi.index)
 
     for n in range(n_feat-1):
-        if (n+1)%50 ==0:
-            print("Selected {}/{} features...".format(n+1,n_feat))
-        p = 4.5-(n**0.4)*0.4
-        c = 0.000001*n**3
-        if c > 100000:
-            c=100000
-        if p < 0.1:
-            p=0.1
+        if (n+1) % 50 == 0:
+            print("Selected {}/{} features...".format(n+1, n_feat))
+
+        p = get_p(n)
+        c = get_c(n)
 
         score = cross_mi.copy()
         score = score.loc[target_mi.index, target_mi.index]
-        score = score.drop(feature_set,axis=0)
+        score = score.drop(feature_set, axis=0)
         score = score[feature_set]
 
         for i in score.index:
-            row = score.loc[i,:]
-            score.loc[i,:] = target_mi[i] /(row**p+c)
+            row = score.loc[i, :]
+            score.loc[i, :] = target_mi[i] / (row**p+c)
 
         next_feature = score.min(axis=1).idxmax(axis=0)
         feature_set.append(next_feature)
 
     return feature_set
+
 
 def merge_ranked(lists):
     zipped_lists = zip(*lists)
