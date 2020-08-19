@@ -492,29 +492,20 @@ def featurize_structure(df: pd.DataFrame) -> pd.DataFrame:
     """
 
     df = df.copy()
-    prdf = PartialRadialDistributionFunction()
-    prdf.fit(df["structure"])
-    cm = CoulombMatrix()
-    cm.fit(df["structure"])
-    scm = SineCoulombMatrix()
-    scm.fit(df["structure"])
-    bf = BondFractions()
-    bf.fit(df["structure"])
-    bob = BagofBonds()
-    bob.fit(df["structure"])
 
     featurizer = MultipleFeaturizer([DensityFeatures(),
                                      GlobalSymmetryFeatures(),
                                      RadialDistributionFunction(),
-                                     cm,
-                                     scm,
+                                     CoulombMatrix().fit(df["structure"]),
+                                     PartialRadialDistributionFunction().fit(df["structure"]),
+                                     SineCoulombMatrix().fit(df["structure"]),
                                      EwaldEnergy(),
-                                     bf,
+                                     BondFractions().fit(df["structure"]),
                                      StructuralHeterogeneity(),
                                      MaximumPackingEfficiency(),
                                      ChemicalOrdering(),
                                      XRDPowderPattern(),
-                                     bob
+                                     BagofBonds().fit(df["structure"])
                                      ])
 
     df = featurizer.featurize_dataframe(df, "structure", multiindex=True, ignore_errors=True)
@@ -533,7 +524,7 @@ def featurize_structure(df: pd.DataFrame) -> pd.DataFrame:
     }
 
     df["GlobalSymmetryFeatures|crystal_system"] = df["GlobalSymmetryFeatures|crystal_system"].map(_crystal_system)
-    df["GlobalSymmetryFeatures|is_centrosymmetric"] = df["GlobalSymmetryFeatures|is_centrosymmetric"].map({True: 1, False: 0})
+    df["GlobalSymmetryFeatures|is_centrosymmetric"] = df["GlobalSymmetryFeatures|is_centrosymmetric"].map(int)
 
     return clean_df(df)
 
@@ -598,6 +589,7 @@ def featurize_site(df: pd.DataFrame, site_stats=("mean", "std_dev")) -> pd.DataF
         df.columns = [f"{fingerprint_name}|" + x if '|' not in x else x for x in df.columns]
 
     return clean_df(df)
+
 
 class MODData():
     def __init__(self, structures: Union[None, List[Structure]], targets: List=[], names: List=[], mpids:List=[],
