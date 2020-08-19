@@ -591,26 +591,57 @@ def featurize_site(df: pd.DataFrame, site_stats=("mean", "std_dev")) -> pd.DataF
     return clean_df(df)
 
 
-class MODData():
-    def __init__(self, structures: Union[None, List[Structure]], targets: List=[], names: List=[], mpids:List=[],
-                 df_featurized=None):
-        """
+class MODData:
+    """ The MODData class takes takes a list of `pymatgen.Structure`
+    objects and creates a `pandas.DataFrame` that contains many matminer
+    features per structure. It then uses mutual information between
+    features and targets, and between the features themselves, to
+    perform feature selection using relevance-redundancy indices.
+
+    """
+
+    def __init__(
+        self,
+        structures: Optional[List[Structure]] = None,
+        targets: Optional[Union[List[float], np.ndarray, List[List[float]]]] = None,
+        target_names: Optional[List[str]] = None,
+        structure_ids: Optional[List[Hashable]] = None,
+        df_featurized: pd.DataFrame = None
+    ):
+        """ Initialise the MODData object either from a list of structures
+        or from an already featurized dataframe. Prediction targets per
+        structure can be specified as lists or an array alongside their
+        target names. A list of unique IDs can be provided to label the
+        structures.
 
         Args:
-            structures:
-            targets:
-            names:
-            mpids:
-            df_featurized: Allow to pass an already featurized DataFrame.
+            structure: list of structures to featurize and predict.
+            targets: list of target properties per structure.
+            target_names: optional list of names of target properties to use in the dataframe.
+            structure_ids: optional list of unique IDs to use instead of generated integers.
+            df_featurized: optional featurized dataframe to use instead of
+                featurizing a new one. Should be passed without structures.
+
         """
         self.structures = structures
         self.df_featurized = df_featurized
 
-        if len(targets)==0:
+        if structures is not None and self.df_featurized is not None:
+            raise RuntimeError(
+                "Only one of `structures` or `df_featurized` should be passed to `MODData`."
+            )
+        if structures is None and self.df_featurized is None:
+            raise RuntimeError(
+                "At least one of `structures` or `df_featurized` should be passed to `MODData`."
+            )
+
+        # set bit for whether targets were provided
+        if not targets:
             self.prediction = True
         else:
             self.prediction = False
 
+        # set bit for whether there are multiple targets per structure
         if np.array(targets).ndim == 2:
             self.targets = targets
             self.PP = True
@@ -618,26 +649,42 @@ class MODData():
             self.targets = [targets]
             self.PP = False
 
-        if len(names)>0:
-            self.names = names
+        if structures is not None and self.targets is not None:
+            if np.shape(targets)[-1] != len(structures):
+                raise ValueError("Targets must have same length as structures.")
+
+        if target_names:
+            self.names = target_names
         else:
             self.names = ['prop'+str(i) for i in range(len(self.targets))]
 
-        self.mpids = mpids
+        if structure_ids:
+            # for backwards compat
+            self.mpids = structure_ids
+            self.ids = structure_ids
+            # check ids are unique
+            if len(set(self.ids)) != len(self.ids):
+                raise ValueError("List of IDs (`structure_ids`) provided must be unique.")
 
-        if len(mpids)>0:
-            self.ids = mpids
+            if len(self.ids) != len(self.structures):
+                raise ValueError("List of IDs (`structure_ids`) must have same length as list of structure.")
+
         else:
             self.ids = ['id'+str(i) for i in range(len(self.structures))]
 
         if not self.prediction:
-            data = {'id':self.ids,}
-            for i,target in enumerate(self.targets):
+            # set up dataframe for targets with columns (id, property_1, ..., property_n)
+            data = {'id': self.ids}
+            for i, target in enumerate(self.targets):
                 data[self.names[i]] = target
             self.df_targets = pd.DataFrame(data)
-            self.df_targets.set_index('id',inplace=True)
-        self.df_structure = pd.DataFrame({'id':self.ids, 'structure':self.structures})
-        self.df_structure.set_index('id',inplace=True)
+            self.df_targets.set_index('id', inplace=True)
+
+        # set up dataframe for structures with columns (id, structure)
+        self.df_structure = pd.DataFrame({'id': self.ids, 'structure': self.structures})
+        self.df_structure.set_index('id', inplace=True)
+
+
 
     def featurize(self,fast=0,db_file='feature_database.pkl'):
         print('Computing features, this can take time...')
