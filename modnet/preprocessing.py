@@ -396,7 +396,40 @@ def merge_ranked(lists: List[List[Hashable]]) -> List[Hashable]:
     return ranked_list
 
 
-def featurize_composition(df):
+def clean_df(df):
+    """ Cleans dataframe by dropping missing values, replacing NaN's and infinities
+    and selecting only columns containing numerical data.
+
+    Args:
+        df (pd.DataFrame): the dataframe to clean.
+
+    Returns:
+        pd.DataFrame: the cleaned dataframe.
+
+    """
+
+    df = df.dropna(axis=1, how='all')
+    df = df.loc[:, (df != 0).any(axis=0)]
+    df = df.replace([np.inf, -np.inf, np.nan], -1)
+    df = df.select_dtypes(include='number')
+
+    return df
+
+
+def featurize_composition(df: pd.DataFrame) -> pd.DataFrame:
+    """ Decorate input `pandas.DataFrame` of structures with composition
+    features from matminer.
+
+    Currently applies the set of all matminer composition features.
+
+    Args:
+        df (pandas.DataFrame): the input dataframe with `"structure"`
+            column containing `pymatgen.Structure` objects.
+
+    Returns:
+        pandas.DataFrame: the decorated DataFrame.
+
+    """
 
     df = df.copy()
     df['composition'] = df['structure'].apply(lambda s: s.composition)
@@ -440,13 +473,23 @@ def featurize_composition(df):
         lambda x: -1 if not isinstance(x, str) else Element(x).Z
     )
 
-    df = df.dropna(axis=1, how='all')
-    df = df.replace([np.inf, -np.inf, np.nan], 0)
-    df = df.select_dtypes(include='number')
-    return df
+    return clean_df(df)
 
 
-def featurize_structure(df):
+def featurize_structure(df: pd.DataFrame) -> pd.DataFrame:
+    """ Decorate input `pandas.DataFrame` of structures with structural
+    features from matminer.
+
+    Currently applies the set of all matminer structure features.
+
+    Args:
+        df (pandas.DataFrame): the input dataframe with `"structure"`
+            column containing `pymatgen.Structure` objects.
+
+    Returns:
+        pandas.DataFrame: the decorated DataFrame.
+
+    """
 
     df = df.copy()
     prdf = PartialRadialDistributionFunction()
@@ -492,62 +535,69 @@ def featurize_structure(df):
     df["GlobalSymmetryFeatures|crystal_system"] = df["GlobalSymmetryFeatures|crystal_system"].map(_crystal_system)
     df["GlobalSymmetryFeatures|is_centrosymmetric"] = df["GlobalSymmetryFeatures|is_centrosymmetric"].map({True: 1, False: 0})
 
-    df = df.dropna(axis=1, how='all')
-    df = df.replace([np.inf, -np.inf, np.nan], -1)
-    df = df.select_dtypes(include='number')
+    return clean_df(df)
 
-    return df
 
-def featurize_site(df):
+def featurize_site(df: pd.DataFrame, site_stats=("mean", "std_dev")) -> pd.DataFrame:
+    """ Decorate input `pandas.DataFrame` of structures with site
+    features from matminer.
+
+    Currently creates the set of all matminer structure features with
+    the `matminer.featurizers.structure.SiteStatsFingerprint`.
+
+    Args:
+        df (pandas.DataFrame): the input dataframe with `"structure"`
+            column containing `pymatgen.Structure` objects.
+        site_stats (Tuple[str]): the matminer site stats to use in the
+            `SiteStatsFingerprint` for all features.
+
+    Returns:
+        pandas.DataFrame: the decorated DataFrame.
+
+    """
 
     df = df.copy()
-    grdf = SiteStatsFingerprint(GeneralizedRadialDistributionFunction.from_preset('gaussian'),stats=('mean', 'std_dev')).fit(df["structure"])
-
     df.columns = ["Input data|"+x for x in df.columns]
 
-    df = SiteStatsFingerprint(AGNIFingerprints(),stats=('mean', 'std_dev')).featurize_dataframe(df,"Input data|structure",multiindex=False,ignore_errors=True)
-    df.columns = ["AGNIFingerPrint|"+x if '|' not in x else x for x in df.columns]
+    site_fingerprints = (
+        AGNIFingerprints(),
+        GeneralizedRadialDistributionFunction.from_preset("gaussian").fit(df["structure"]),
+        OPSiteFingerprint(),
+        CrystalNNFingerprint(),
+        VoronoiFingerprint(),
+        GaussianSymmFunc(),
+        ChemEnvSiteFingerprint.from_preset("simple"),
+        CoordinationNumber(),
+        LocalPropertyDifference(),
+        BondOrientationalParameter(),
+        AverageBondLength(VoronoiNN()),
+        AverageBondAngle(VoronoiNN())
+    )
 
+    for fingerprint in site_fingerprints:
+        site_stats = SiteStatsFingerprint(
+            fingerprint,
+            stats=site_stats
+        )
 
-    df = SiteStatsFingerprint(OPSiteFingerprint(),stats=('mean', 'std_dev')).featurize_dataframe(df,"Input data|structure",multiindex=False,ignore_errors=True)
-    df.columns = ["OPSiteFingerprint|"+x if '|' not in x else x for x in df.columns]
+        df = site_stats.featurize_dataframe(
+            df,
+            "Input data|structure",
+            mutliindex=False,
+            ignore_errors=True
+        )
 
-    df = SiteStatsFingerprint(CrystalNNFingerprint.from_preset("ops"),stats=('mean', 'std_dev')).featurize_dataframe(df,"Input data|structure",multiindex=False,ignore_errors=True)
-    df.columns = ["CrystalNNFingerprint|"+x if '|' not in x else x for x in df.columns]
+        fingerprint_name = fingerprint.__class__.__name__
 
-    df = SiteStatsFingerprint(VoronoiFingerprint(),stats=('mean', 'std_dev')).featurize_dataframe(df,"Input data|structure",multiindex=False,ignore_errors=True)
-    df.columns = ["VoronoiFingerprint|"+x if '|' not in x else x for x in df.columns]
+        # alias some features for backwards compatibility with pretrained models
+        if fingerprint_name == "GeneralizedRadialDistributionFunction":
+            fingerprint_name = "GeneralizedRDF"
+        elif fingerprint_name == "AGNIFingerprints":
+            fingerprint_name = "AGNIFingerprint"
 
-    df = SiteStatsFingerprint(GaussianSymmFunc(),stats=('mean', 'std_dev')).featurize_dataframe(df,"Input data|structure",multiindex=False,ignore_errors=True)
-    df.columns = ["GaussianSymmFunc" + x if '|' not in x else x for x in df.columns]
+        df.columns = [f"{fingerprint_name}|" + x if '|' not in x else x for x in df.columns]
 
-    df = SiteStatsFingerprint(ChemEnvSiteFingerprint.from_preset("simple"),stats=('mean', 'std_dev')).featurize_dataframe(df,"Input data|structure",multiindex=False,ignore_errors=True)
-    df.columns = ["ChemEnvSiteFingerprint|"+x if '|' not in x else x for x in df.columns]
-
-    df = SiteStatsFingerprint(CoordinationNumber(),stats=('mean', 'std_dev')).featurize_dataframe(df,"Input data|structure",multiindex=False,ignore_errors=True)
-    df.columns = ["CoordinationNumber|"+x if '|' not in x else x for x in df.columns]
-
-    df = grdf.featurize_dataframe(df,"Input data|structure",multiindex=False,ignore_errors=True)
-    df.columns = ["GeneralizedRDF|"+x if '|' not in x else x for x in df.columns]
-
-    df = SiteStatsFingerprint(LocalPropertyDifference(),stats=('mean', 'std_dev')).featurize_dataframe(df,"Input data|structure",multiindex=False,ignore_errors=True)
-    df.columns = ["LocalPropertyDifference|"+x if '|' not in x else x for x in df.columns]
-
-    df = SiteStatsFingerprint(BondOrientationalParameter(),stats=('mean', 'std_dev')).featurize_dataframe(df,"Input data|structure",multiindex=False,ignore_errors=True)
-    df.columns = ["BondOrientationParameter|"+x if '|' not in x else x for x in df.columns]
-
-    df = SiteStatsFingerprint(AverageBondLength(VoronoiNN()),stats=('mean', 'std_dev')).featurize_dataframe(df,"Input data|structure",multiindex=False,ignore_errors=True)
-    df.columns = ["AverageBondLength|"+x if '|' not in x else x for x in df.columns]
-
-    df = SiteStatsFingerprint(AverageBondAngle(VoronoiNN()),stats=('mean', 'std_dev')).featurize_dataframe(df,"Input data|structure",multiindex=False,ignore_errors=True)
-    df.columns = ["AverageBondAngle|"+x if '|' not in x else x for x in df.columns]
-
-    df = df.dropna(axis=1,how='all')
-    df = df.loc[:, (df != 0).any(axis=0)]
-    df = df.replace([np.inf, -np.inf, np.nan], -1)
-    df = df.select_dtypes(include='number')
-    return df
-
+    return clean_df(df)
 
 class MODData():
     def __init__(self, structures: Union[None, List[Structure]], targets: List=[], names: List=[], mpids:List=[],
@@ -636,7 +686,7 @@ class MODData():
         self.df_featurized = df_final
         print('Data has successfully been featurized!')
 
-    def feature_selection(self,n=1500, full_cross_nmi=None):
+    def feature_selection(self, n=1500, full_cross_nmi=None):
         """
 
         Args:
