@@ -237,3 +237,43 @@ def test_small_moddata_featurization():
     # Should also test feature selection here
     # new_moddata.feature_selection(10)
     # assert len(new_moddata.optimal_features) == 10
+
+
+def test_merge_ranked():
+    from modnet.preprocessing import merge_ranked
+
+    # Test lists of the same length
+    test_features = [
+        ["a", "b", "c"],
+        ["d", "b", "e"]
+    ]
+
+    expected = ["a", "d", "b", "c", "e"]
+    assert merge_ranked(test_features) == expected
+
+    # Test lists of different length
+    test_features = [
+        ["a", "b", "c"],
+        ["d", "b", "e", "g"]
+    ]
+
+    expected = ["a", "d", "b", "c", "e", "g"]
+    assert merge_ranked(test_features) == expected
+
+    test_features = [
+        ["d", "b", "e", "g"],
+        ["a", "b", "c"]
+    ]
+
+    expected = ["d", "a", "b", "e", "c", "g"]
+    assert merge_ranked(test_features) == expected
+
+    # Test lists with other hashable types
+    test_features = [
+        ["a", "b", "c"],
+        ["d", "b", 2, "g"],
+        ["c", 0, "e", "0"]
+    ]
+
+    expected = ["a", "d", "c", "b", 0, 2, "e", "g", "0"]
+    assert merge_ranked(test_features) == expected

@@ -68,7 +68,7 @@ from matminer.featurizers.site import (
     VoronoiFingerprint,
 )
 from pymatgen.analysis.local_env import VoronoiNN
-from typing import Dict, List, Union, Optional, Callable
+from typing import Dict, List, Union, Optional, Callable, Hashable
 
 DATABASE = pd.DataFrame([])
 
@@ -235,10 +235,11 @@ def get_features_relevance_redundancy(
             either a callable that takes `n` as an argument and returns the
             desired `p` or `c`, or another dictionary containing the key `"value"`
             that stores a constant value of `p` or `c`.
-        return_pc: Whether to returcolumnshe p and c values in the output dictionaries.
+        return_pc: Whether to return p and c values in the output dictionaries.
 
     Returns:
         list: List of dictionaries containing the results of the relevance-redundancy selection algorithm.
+
     """
     # Initial checks
     if set(cross_nmi.index) != set(cross_nmi.columns):
@@ -364,15 +365,34 @@ def get_features_dyn(n_feat, cross_mi, target_mi):
     return feature_set
 
 
-def merge_ranked(lists):
-    zipped_lists = zip(*lists)
+def merge_ranked(lists: List[List[Hashable]]) -> List[Hashable]:
+    """ For multiple lists of ranked feature names/IDs (e.g. for different
+    targets), work through the lists and merge them such that each
+    feature is included once according to its highest rank across each
+    list.
+
+    Args:
+        lists (List[List[Hashable]]): the list of lists to merge.
+
+    Returns:
+        List[Hashable]: list of merged and ranked feature names/IDs.
+
+    """
+    if not all(len(lists[0]) == len(sublist) for sublist in lists):
+        # pad all lists to same length
+        max_len = max(len(sublist) for sublist in lists)
+        for ind, sublist in enumerate(lists):
+            if len(sublist) < max_len:
+                lists[ind].extend((max_len - len(sublist))*[None])
+
     total_set = set()
     ranked_list = []
-    for subrank in zipped_lists:
+    for subrank in zip(*lists):
         for feature in subrank:
-            if feature not in total_set:
+            if feature not in total_set and feature is not None:
                 ranked_list.append(feature)
                 total_set.add(feature)
+
     return ranked_list
 
 
