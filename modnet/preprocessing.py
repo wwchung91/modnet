@@ -659,7 +659,8 @@ class MODData:
             self.names = ['prop'+str(i) for i in range(len(self.targets))]
 
         if structure_ids:
-            # for backwards compat
+            # for backwards compat, always store the *passed* list of
+            # IDs, so they can be used when loading from a database file
             self.mpids = structure_ids
             self.ids = structure_ids
             # check ids are unique
@@ -670,6 +671,7 @@ class MODData:
                 raise ValueError("List of IDs (`structure_ids`) must have same length as list of structure.")
 
         else:
+            self.mpids = None
             self.ids = ['id'+str(i) for i in range(len(self.structures))]
 
         if not self.prediction:
@@ -684,96 +686,133 @@ class MODData:
         self.df_structure = pd.DataFrame({'id': self.ids, 'structure': self.structures})
         self.df_structure.set_index('id', inplace=True)
 
+    def featurize(self, fast: bool = False, db_file: str = 'feature_database.pkl'):
+        """ For the input structures, construct many matminer features
+        and save a featurized dataframe. If `db_file` is specified, this
+        method will try to load previous feature calculations for each
+        structure ID instead of recomputing.
 
+        Sets the `self.df_featurized` attribute.
 
-    def featurize(self,fast=0,db_file='feature_database.pkl'):
+        Args:
+            fast (bool): whether or not to try to load from a backup.
+            db_file (str): filename of a pickled dataframe containing
+                with the same ID index as this `MODData` object.
+
+        """
+
         print('Computing features, this can take time...')
-        if fast and len(self.mpids)>0:
-            print('Fast featurization on, retrieving from database...')
-            this_dir, this_filename = os.path.split(__file__)
-            global DATABASE
-            if len(DATABASE) == 0:
-                DATABASE = pd.read_pickle(db_file)
-            mpids_done = [x for x in self.mpids if x in DATABASE.index]
-            print('Retrieved features for {} out of {} materials'.format(len(mpids_done),len(self.mpids)))
-            df_done = DATABASE.loc[mpids_done]
-            df_todo = self.df_structure.drop(mpids_done,axis=0)
 
-            if len(df_todo) > 0 and len(df_done) > 0:
+        df_done = None
+        df_todo = None
+
+        if self.df_featurized:
+            raise RuntimeError("Not overwriting existing featurized dataframe.")
+
+        if fast and self.mpids:
+            print('Fast featurization on, retrieving from database...')
+
+            global DATABASE
+            if DATABASE.empty:
+                DATABASE = pd.read_pickle(db_file)
+
+            mpids_done = [x for x in self.mpids if x in DATABASE.index]
+
+            print(f"Retrieved features for {len(mpids_done)} out of {len(self.mpids)} materials")
+            df_done = DATABASE.loc[mpids_done]
+            df_todo = self.df_structure.drop(mpids_done, axis=0)
+
+        # if any structures were already loaded
+        if df_done:
+            # if any are left to compute, do them
+            if len(df_todo) > 0:
                 df_composition = featurize_composition(df_todo)
                 df_structure = featurize_structure(df_todo)
                 df_site = featurize_site(df_todo)
-
                 df_final = df_done.append(df_composition.join(df_structure.join(df_site)))
-                df_final = df_final.reindex(self.mpids)
-            elif len(df_todo) == 0:
-                df_final = df_done
+
+            # otherwise, all structures were successfully loaded
             else:
-                df_composition = featurize_composition(self.df_structure)
-                df_structure = featurize_structure(self.df_structure)
-                df_site = featurize_site(self.df_structure)
+                df_final = df_done
 
-                df_final = df_composition.join(df_structure.join(df_site))
-
+        # otherwise, no structures were loaded, so we need to compute all
         else:
             df_composition = featurize_composition(self.df_structure)
             df_structure = featurize_structure(self.df_structure)
             df_site = featurize_site(self.df_structure)
-
             df_final = df_composition.join(df_structure.join(df_site))
+
+        if self.mpids:
+            df_final = df_final.reindex(self.mpids)
+
         df_final = df_final.replace([np.inf, -np.inf, np.nan], 0)
+
         self.df_featurized = df_final
         print('Data has successfully been featurized!')
 
-    def feature_selection(self, n=1500, full_cross_nmi=None):
-        """
+    def feature_selection(self, n: int = 1500, full_cross_nmi: Optional[pd.DataFrame] = None):
+        """ Compute the mutual information between features and targets,
+        then apply relevance-redundancy rankings to choose the top `n`
+        features.
+
+        Sets the `self.optimal_features` attribute to a list of feature
+        names.
 
         Args:
-            n:
-            full_cross_nmi: Allow to use a specific Cross-Features NMI.
+            n: number of desired features.
+            full_cross_nmi: specify the cross NMI between features as a
+                dataframe.
+
         """
         assert hasattr(self, 'df_featurized'), 'Please featurize the data first'
         assert not self.prediction, 'Please provide targets'
 
         ranked_lists = []
+        optimal_features_by_target = {}
 
         # Loading mutual information between features
         if full_cross_nmi is None:
             this_dir, this_filename = os.path.split(__file__)
             dp = os.path.join(this_dir, "data", "Features_cross")
-            full_cross_nmi = pd.read_pickle(dp)
+            if os.path.isfile(dp):
+                full_cross_nmi = pd.read_pickle(dp)
         else:
             full_cross_nmi = full_cross_nmi
 
-        for i,name in enumerate(self.names):
-            print("Starting target {}/{}: {} ...".format(i+1,len(self.targets),self.names[i]))
+        if full_cross_nmi is None:
+            if full_cross_nmi is None:
+                print('Computing cross NMI between all features...')
+                df = self.df_featurized.copy()
+                cross_nmi = get_cross_nmi(df)
+
+        for i, name in enumerate(self.names):
+            print("Starting target {}/{}: {} ...".format(i+1, len(self.targets), self.names[i]))
 
             # Computing mutual information with target
-            print("Computing mutual information ...")
+            print("Computing mutual information between features and target...")
             df = self.df_featurized.copy()
-            y_nmi = nmi_target(self.df_featurized,self.df_targets[[name]])[name]
+            y_nmi = nmi_target(self.df_featurized, self.df_targets[[name]])[name]
+
+            # remove columns from cross NMI if not present in feature NMI
+            cross_nmi = full_cross_nmi.copy(deep=True)
+            missing = [x for x in cross_nmi.index if x not in y_nmi.index]
+            cross_nmi = cross_nmi.drop(missing, axis=0).drop(missing, axis=1)
 
             print('Computing optimal features...')
-            cross_nmi = full_cross_nmi.copy(deep=True)
+            optimal_features_by_target[name] = get_features_dyn(min(n, len(y_nmi.index)), cross_nmi, y_nmi)
+            ranked_lists.append(optimal_features_by_target[name])
 
-            a = []
-            for x in cross_nmi.index:
-                if x not in y_nmi.index:
-                    a.append(x)
-            cross_nmi = cross_nmi.drop(a,axis=0).drop(a,axis=1)
-            # opt_features = get_features_dyn(min(n,len(cross_nmi.index)),cross_nmi,y_nmi)
-            opt_features = get_features_dyn(min(n,len(y_nmi.index)),cross_nmi,y_nmi)
-            ranked_lists.append(opt_features)
-            print("Done with target {}/{}: {}.".format(i+1,len(self.targets),self.names[i]))
+            print("Done with target {}/{}: {}.".format(i+1, len(self.targets), name))
 
         print('Merging all features...')
         self.optimal_features = merge_ranked(ranked_lists)
+        self.optimal_features_by_target = optimal_features_by_target
         print('Done.')
 
     def shuffle(self):
         # caution, not fully implemented
         raise NotImplementedError("shuffle function not yet finished.")
-        self.df_featurized =self.df_featurized.sample(frac=1)
+        self.df_featurized = self.df_featurized.sample(frac=1)
         self.df_targets = self.df_targets.loc[self.df_featurized.index]
 
     def save(self, filename):
