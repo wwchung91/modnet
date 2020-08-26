@@ -7,7 +7,6 @@ and functions to compute normalized mutual information (NMI) and relevance redun
 
 """
 
-import pickle
 import os
 import logging
 
@@ -580,7 +579,7 @@ def featurize_site(df: pd.DataFrame, site_stats=("mean", "std_dev")) -> pd.DataF
 
         fingerprint_name = fingerprint.__class__.__name__
 
-        # alias some features for backwards compatibility with pretrained models
+        # rename some features for backwards compatibility with pretrained models
         if fingerprint_name == "GeneralizedRadialDistributionFunction":
             fingerprint_name = "GeneralizedRDF"
         elif fingerprint_name == "AGNIFingerprints":
@@ -598,6 +597,19 @@ class MODData:
     features and targets, and between the features themselves, to
     perform feature selection using relevance-redundancy indices.
 
+    Attributes:
+        df_structure (pd.DataFrame): dataframe storing the `pymatgen.Structure`
+            representations for each structured, indexed by ID.
+        df_targets (pd.Dataframe): dataframe storing the prediction targets
+            per structure, indexed by ID.
+        df_featurized (pd.DataFrame): dataframe with columns storing all
+            computed features per structure, indexed by ID.
+        optimal_features (List[str]): if feature selection has been performed
+            this attribute stores a list of the selected features.
+        optimal_features_by_target (Dict[str, List[str]]): if feature selection has been performed
+            this attribute stores a list of the selected features, broken down by
+            target property.
+
     """
 
     def __init__(
@@ -606,7 +618,7 @@ class MODData:
         targets: Optional[Union[List[float], np.ndarray, List[List[float]]]] = None,
         target_names: Optional[List[str]] = None,
         structure_ids: Optional[List[Hashable]] = None,
-        df_featurized: pd.DataFrame = None
+        df_featurized: Optional[pd.DataFrame] = None
     ):
         """ Initialise the MODData object either from a list of structures
         or from an already featurized dataframe. Prediction targets per
@@ -615,15 +627,15 @@ class MODData:
         structures.
 
         Args:
-            structure: list of structures to featurize and predict.
-            targets: list of target properties per structure.
+            structures: list of structures to featurize and predict.
+            targets: optional list or list of lists of prediction targets per structure.
             target_names: optional list of names of target properties to use in the dataframe.
             structure_ids: optional list of unique IDs to use instead of generated integers.
             df_featurized: optional featurized dataframe to use instead of
                 featurizing a new one. Should be passed without structures.
 
         """
-        self.structures = structures
+
         self.df_featurized = df_featurized
 
         if structures is not None and self.df_featurized is not None:
@@ -635,55 +647,41 @@ class MODData:
                 "At least one of `structures` or `df_featurized` should be passed to `MODData`."
             )
 
-        # set bit for whether targets were provided
-        if not targets:
-            self.prediction = True
-        else:
-            self.prediction = False
-
-        # set bit for whether there are multiple targets per structure
-        if np.array(targets).ndim == 2:
-            self.targets = targets
-            self.PP = True
-        else:
-            self.targets = [targets]
-            self.PP = False
-
         if structures is not None and self.targets is not None:
             if np.shape(targets)[-1] != len(structures):
                 raise ValueError("Targets must have same length as structures.")
 
         if target_names:
-            self.names = target_names
+            if np.shape(targets)[-1] != len(target_names):
+                raise ValueError("Target names must be supplied for every target.")
         else:
-            self.names = ['prop'+str(i) for i in range(len(self.targets))]
+            target_names = ['prop'+str(i) for i in range(len(targets))]
 
         if structure_ids:
             # for backwards compat, always store the *passed* list of
             # IDs, so they can be used when loading from a database file
             self.mpids = structure_ids
-            self.ids = structure_ids
             # check ids are unique
-            if len(set(self.ids)) != len(self.ids):
+            if len(set(structure_ids)) != len(structure_ids):
                 raise ValueError("List of IDs (`structure_ids`) provided must be unique.")
 
-            if len(self.ids) != len(self.structures):
+            if len(structure_ids) != len(structures):
                 raise ValueError("List of IDs (`structure_ids`) must have same length as list of structure.")
 
         else:
             self.mpids = None
-            self.ids = ['id'+str(i) for i in range(len(self.structures))]
+            structure_ids = [f"id{i}" for i in range(len(structures))]
 
         if not self.prediction:
             # set up dataframe for targets with columns (id, property_1, ..., property_n)
-            data = {'id': self.ids}
-            for i, target in enumerate(self.targets):
-                data[self.names[i]] = target
+            data = {name: target for name, target in zip(target_names, targets)}
+            data["id"] = structure_ids
+
             self.df_targets = pd.DataFrame(data)
             self.df_targets.set_index('id', inplace=True)
 
         # set up dataframe for structures with columns (id, structure)
-        self.df_structure = pd.DataFrame({'id': self.ids, 'structure': self.structures})
+        self.df_structure = pd.DataFrame({'id': structure_ids, 'structure': structures})
         self.df_structure.set_index('id', inplace=True)
 
     def featurize(self, fast: bool = False, db_file: str = 'feature_database.pkl'):
@@ -814,6 +812,21 @@ class MODData:
         raise NotImplementedError("shuffle function not yet finished.")
         self.df_featurized = self.df_featurized.sample(frac=1)
         self.df_targets = self.df_targets.loc[self.df_featurized.index]
+
+    @property
+    def structures(self) -> List[Structure]:
+        """Returns the list of `pymatgen.Structure` objects. """
+        return self.df_structure["structure"]
+
+    @property
+    def targets(self) -> List[List[float]]:
+        """ Returns a list of lists of prediction targets. """
+        return self.df_targets.values.tolist()
+
+    @property
+    def names(self) -> List[str]:
+        """ Returns the list of prediction target field names. """
+        return list(self.df_targets)
 
     def save(self, filename):
         """ Pickle the contents of the `MODData` object
