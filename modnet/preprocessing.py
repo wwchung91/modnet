@@ -557,9 +557,9 @@ def featurize_site(df: pd.DataFrame, site_stats=("mean", "std_dev")) -> pd.DataF
 
     site_fingerprints = (
         AGNIFingerprints(),
-        GeneralizedRadialDistributionFunction.from_preset("gaussian").fit(df["Input data|structure"]),
+        # GeneralizedRadialDistributionFunction.from_preset("gaussian").fit(df["Input data|structure"]),
         OPSiteFingerprint(),
-        CrystalNNFingerprint(),
+        # CrystalNNFingerprint().from_preset("ops"),
         VoronoiFingerprint(),
         GaussianSymmFunc(),
         ChemEnvSiteFingerprint.from_preset("simple"),
