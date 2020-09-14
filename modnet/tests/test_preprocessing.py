@@ -227,14 +227,12 @@ def test_small_moddata_featurization():
     mp_moddata = MODData.load(data_file)
     structures = mp_moddata.structures
     targets = mp_moddata.targets
-
     names = mp_moddata.names
 
-    new_moddata = MODData(structures, targets, names=names)
+    new_moddata = MODData(structures, targets, target_names=names)
     new_moddata.featurize(fast=False)
 
     assert len(new_moddata.df_featurized) == len(structures)
-
 
     # Should also test feature selection here
     # new_moddata.feature_selection(10)
