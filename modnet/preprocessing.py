@@ -71,6 +71,7 @@ from typing import Dict, List, Union, Optional, Callable, Hashable
 
 DATABASE = pd.DataFrame([])
 
+logging.getLogger().setLevel(logging.INFO)
 
 def nmi_target(df_feat: pd.DataFrame, df_target: pd.DataFrame,
                drop_constant_features: bool = True, **kwargs) -> pd.DataFrame:
@@ -344,7 +345,7 @@ def get_features_dyn(n_feat, cross_mi, target_mi):
 
     for n in range(n_feat-1):
         if (n+1) % 50 == 0:
-            print("Selected {}/{} features...".format(n+1, n_feat))
+            logging.info("Selected {}/{} features...".format(n+1, n_feat))
 
         p = get_p(n)
         c = get_c(n)
@@ -429,7 +430,7 @@ def featurize_composition(df: pd.DataFrame) -> pd.DataFrame:
         pandas.DataFrame: the decorated DataFrame.
 
     """
-
+    logging.info("Applying composition featurizers...")
     df = df.copy()
     df['composition'] = df['structure'].apply(lambda s: s.composition)
     featurizer = MultipleFeaturizer([ElementProperty.from_preset("magpie"),
@@ -489,6 +490,8 @@ def featurize_structure(df: pd.DataFrame) -> pd.DataFrame:
         pandas.DataFrame: the decorated DataFrame.
 
     """
+
+    logging.info("Applying structure featurizers...")
 
     df = df.copy()
 
@@ -618,7 +621,7 @@ class MODData:
         targets: Optional[Union[List[float], np.ndarray, List[List[float]]]] = None,
         target_names: Optional[List[str]] = None,
         structure_ids: Optional[List[Hashable]] = None,
-        df_featurized: Optional[pd.DataFrame] = None
+        df_featurized: Optional[pd.DataFrame] = None,
     ):
         """ Initialise the MODData object either from a list of structures
         or from an already featurized dataframe. Prediction targets per
@@ -699,7 +702,7 @@ class MODData:
 
         """
 
-        print('Computing features, this can take time...')
+        logging.info('Computing features, this can take time...')
 
         df_done = None
         df_todo = None
@@ -708,7 +711,7 @@ class MODData:
             raise RuntimeError("Not overwriting existing featurized dataframe.")
 
         if fast and self.mpids:
-            print('Fast featurization on, retrieving from database...')
+            logging.info('Fast featurization on, retrieving from database...')
 
             global DATABASE
             if DATABASE.empty:
@@ -716,7 +719,7 @@ class MODData:
 
             mpids_done = [x for x in self.mpids if x in DATABASE.index]
 
-            print(f"Retrieved features for {len(mpids_done)} out of {len(self.mpids)} materials")
+            logging.info(f"Retrieved features for {len(mpids_done)} out of {len(self.mpids)} materials")
             df_done = DATABASE.loc[mpids_done]
             df_todo = self.df_structure.drop(mpids_done, axis=0)
 
@@ -746,7 +749,7 @@ class MODData:
         df_final = df_final.replace([np.inf, -np.inf, np.nan], 0)
 
         self.df_featurized = df_final
-        print('Data has successfully been featurized!')
+        logging.info('Data has successfully been featurized!')
 
     def feature_selection(self, n: int = 1500, full_cross_nmi: Optional[pd.DataFrame] = None):
         """ Compute the mutual information between features and targets,
@@ -779,15 +782,15 @@ class MODData:
 
         if full_cross_nmi is None:
             if full_cross_nmi is None:
-                print('Computing cross NMI between all features...')
+                logging.info('Computing cross NMI between all features...')
                 df = self.df_featurized.copy()
                 cross_nmi = get_cross_nmi(df)
 
         for i, name in enumerate(self.names):
-            print("Starting target {}/{}: {} ...".format(i+1, len(self.targets), self.names[i]))
+            logging.info("Starting target {}/{}: {} ...".format(i+1, len(self.targets), self.names[i]))
 
             # Computing mutual information with target
-            print("Computing mutual information between features and target...")
+            logging.info("Computing mutual information between features and target...")
             df = self.df_featurized.copy()
             y_nmi = nmi_target(self.df_featurized, self.df_targets[[name]])[name]
 
@@ -796,16 +799,16 @@ class MODData:
             missing = [x for x in cross_nmi.index if x not in y_nmi.index]
             cross_nmi = cross_nmi.drop(missing, axis=0).drop(missing, axis=1)
 
-            print('Computing optimal features...')
+            logging.info('Computing optimal features...')
             optimal_features_by_target[name] = get_features_dyn(min(n, len(y_nmi.index)), cross_nmi, y_nmi)
             ranked_lists.append(optimal_features_by_target[name])
 
-            print("Done with target {}/{}: {}.".format(i+1, len(self.targets), name))
+            logging.info("Done with target {}/{}: {}.".format(i+1, len(self.targets), name))
 
-        print('Merging all features...')
+        logging.info('Merging all features...')
         self.optimal_features = merge_ranked(ranked_lists)
         self.optimal_features_by_target = optimal_features_by_target
-        print('Done.')
+        logging.info('Done.')
 
     def shuffle(self):
         # caution, not fully implemented
@@ -837,7 +840,7 @@ class MODData:
 
         """
         pd.to_pickle(self, filename)
-        print(f'Data successfully saved as {filename}!')
+        logging.info(f'Data successfully saved as {filename}!')
 
     @staticmethod
     def load(filename):
