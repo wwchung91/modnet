@@ -73,7 +73,8 @@ DATABASE = pd.DataFrame([])
 
 logging.getLogger().setLevel(logging.INFO)
 
-def nmi_target(df_feat: pd.DataFrame, df_target: pd.DataFrame,
+
+def nmi_target(df_feat: pd.DataFrame, df_targets: pd.DataFrame,
                drop_constant_features: bool = True, **kwargs) -> pd.DataFrame:
     """
     Computes the Normalized Mutual Information (NMI) between a list of
@@ -82,7 +83,7 @@ def nmi_target(df_feat: pd.DataFrame, df_target: pd.DataFrame,
     Args:
         df_feat (pandas.DataFrame): Dataframe containing the input features for
             which the NMI with the target variable is to be computed.
-        df_target (pandas.DataFrame): Dataframe containing the target variable.
+        df_targets (pandas.DataFrame): Dataframe containing the target variable.
             This DataFrame should contain only one column and have the same
             size as `df_feat`.
         drop_constant_features (bool): If True, the features that are constant
@@ -97,10 +98,10 @@ def nmi_target(df_feat: pd.DataFrame, df_target: pd.DataFrame,
 
     """
     # Initial checks
-    if df_target.shape[1] != 1:
+    if df_targets.shape[1] != 1:
         raise ValueError('The target DataFrame should have exactly one column.')
 
-    if len(df_feat) != len(df_target):
+    if len(df_feat) != len(df_targets):
         raise ValueError(
             'The input features DataFrame and the target variable DataFrame '
             'should contain the same number of data points.'
@@ -113,13 +114,13 @@ def nmi_target(df_feat: pd.DataFrame, df_target: pd.DataFrame,
         df_feat = df_feat.drop(to_drop, axis=1)
 
     # Prepare the output DataFrame and compute the mutual information
-    target_name = df_target.columns[0]
+    target_name = df_targets.columns[0]
     out_df = pd.DataFrame([], columns=[target_name], index=df_feat.columns)
-    out_df.loc[:, target_name] = (mutual_info_regression(df_feat, df_target[target_name], **kwargs))
+    out_df.loc[:, target_name] = (mutual_info_regression(df_feat, df_targets[target_name], **kwargs))
 
     # Compute the "self" mutual information (i.e. information entropy) of the target variable and of the input features
-    target_mi = mutual_info_regression(df_target[target_name].values.reshape(-1, 1),
-                                       df_target[target_name], **kwargs)[0]
+    target_mi = mutual_info_regression(df_targets[target_name].values.reshape(-1, 1),
+                                       df_targets[target_name], **kwargs)[0]
     diag = {}
     for x in df_feat.columns:
         diag[x] = (mutual_info_regression(df_feat[x].values.reshape(-1, 1), df_feat[x], **kwargs))[0]
@@ -549,12 +550,14 @@ def featurize_site(df: pd.DataFrame, site_stats=("mean", "std_dev")) -> pd.DataF
 
     """
 
+    logging.info("Applying site featurizers...")
+
     df = df.copy()
     df.columns = ["Input data|"+x for x in df.columns]
 
     site_fingerprints = (
         AGNIFingerprints(),
-        GeneralizedRadialDistributionFunction.from_preset("gaussian").fit(df["structure"]),
+        GeneralizedRadialDistributionFunction.from_preset("gaussian").fit(df["Input data|structure"]),
         OPSiteFingerprint(),
         CrystalNNFingerprint(),
         VoronoiFingerprint(),
@@ -576,7 +579,7 @@ def featurize_site(df: pd.DataFrame, site_stats=("mean", "std_dev")) -> pd.DataF
         df = site_stats.featurize_dataframe(
             df,
             "Input data|structure",
-            mutliindex=False,
+            multiindex=False,
             ignore_errors=True
         )
 
@@ -650,9 +653,9 @@ class MODData:
                 "At least one of `structures` or `df_featurized` should be passed to `MODData`."
             )
 
-        if structures is not None and self.targets is not None:
-            if np.shape(targets)[-1] != len(structures):
-                raise ValueError("Targets must have same length as structures.")
+        if structures is not None and targets is not None:
+            if np.shape(targets)[0] != len(structures):
+                raise ValueError(f"Targets must have same length as structures: {np.shape(targets)} vs {len(structures)}")
 
         if target_names:
             if np.shape(targets)[-1] != len(target_names):
@@ -675,7 +678,7 @@ class MODData:
             self.mpids = None
             structure_ids = [f"id{i}" for i in range(len(structures))]
 
-        if not self.prediction:
+        if targets is None:
             # set up dataframe for targets with columns (id, property_1, ..., property_n)
             data = {name: target for name, target in zip(target_names, targets)}
             data["id"] = structure_ids
@@ -765,8 +768,10 @@ class MODData:
                 dataframe.
 
         """
-        assert hasattr(self, 'df_featurized'), 'Please featurize the data first'
-        assert not self.prediction, 'Please provide targets'
+        if getattr(self, "df_featurized") is None:
+            raise RuntimeError("Mutual information feature selection requiresd featurized data, please call `.featurize()`")
+        if getattr(self, "df_targets") is None:
+            raise RuntimeError("Mutual information feature selection requires target properties")
 
         ranked_lists = []
         optimal_features_by_target = {}
@@ -822,9 +827,9 @@ class MODData:
         return self.df_structure["structure"]
 
     @property
-    def targets(self) -> List[List[float]]:
+    def targets(self) -> np.ndarray:
         """ Returns a list of lists of prediction targets. """
-        return self.df_targets.values.tolist()
+        return self.df_targets.values
 
     @property
     def names(self) -> List[str]:
